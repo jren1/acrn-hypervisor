@@ -1,0 +1,265 @@
+From 3fcdecbe400769e6345bc7e13f346b880ba3b391 Mon Sep 17 00:00:00 2001
+From: Chaohong guo <chaohong.guo@intel.com>
+Date: Thu, 26 Apr 2018 23:26:54 +0800
+Subject: [PATCH] Test for Simics 1. disable iommu 2. enable UART 3f8 3. enable
+ unrestricted guest (32 bit code) 4. hv_printf
+
+---
+ arch/x86/cpu.c                 |  3 +++
+ arch/x86/guest/vmcall.c        |  4 ++++
+ arch/x86/vmexit.c              | 18 +++++----------
+ arch/x86/vmx.c                 | 52 +++++++++++++++++++++++++-----------------
+ bsp/uefi/efi/boot.c            |  4 ++--
+ bsp/uefi/include/bsp/bsp_cfg.h |  2 +-
+ common/hypercall.c             | 13 +++++++++++
+ include/public/acrn_hv_defs.h  |  1 +
+ 9 files changed, 62 insertions(+), 37 deletions(-)
+
+diff --git a/arch/x86/cpu.c b/arch/x86/cpu.c
+index 02fb4b6..72564cb 100644
+--- a/arch/x86/cpu.c
++++ b/arch/x86/cpu.c
+@@ -556,10 +556,13 @@ void bsp_boot_init(void)
+ 
+ 	ASSERT(get_cpu_id() == CPU_BOOT_ID, "");
+ 
++#if 0
+ 	if (init_iommu() != 0) {
+ 		pr_fatal("%s, init iommu failed\n", __func__);
+ 		return;
+ 	}
++#endif
++
+ 
+ 	console_setup_timer();
+ 
+diff --git a/arch/x86/guest/vmcall.c b/arch/x86/guest/vmcall.c
+index cb27723..08ff18b 100644
+--- a/arch/x86/guest/vmcall.c
++++ b/arch/x86/guest/vmcall.c
+@@ -134,6 +134,10 @@ int vmcall_vmexit_handler(struct vcpu *vcpu)
+ 		ret = hcall_setup_sbuf(vm, param1);
+ 		break;
+ 
++	case HC_PRINT:
++		ret = hcall_print(vm, param1);
++		break;
++
+ 	case HC_WORLD_SWITCH:
+ 		ret = hcall_world_switch(vcpu);
+ 		break;
+diff --git a/arch/x86/vmexit.c b/arch/x86/vmexit.c
+index ac68620..13bf48d 100644
+--- a/arch/x86/vmexit.c
++++ b/arch/x86/vmexit.c
+@@ -211,6 +211,8 @@ static int unhandled_vmexit_handler(__unused struct vcpu *vcpu)
+ 	return 0;
+ }
+ 
++extern uint64_t cr0_1_mask, cr0_0_mask, cr4_1_mask, cr4_0_mask;
++
+ static int write_cr0(struct vcpu *vcpu, uint64_t value)
+ {
+ 	uint32_t value32;
+@@ -276,20 +278,12 @@ static int write_cr4(struct vcpu *vcpu, uint64_t value)
+ 
+ 	pr_dbg("VMM: Guest trying to write 0x%08x to CR4", value);
+ 
+-	/* Read host mask value */
+-	temp64 = exec_vmread(VMX_CR4_MASK);
+-
+ 	/* Clear all bits being written by guest that are owned by host */
+-	value &= ~temp64;
++	temp64 = (value | cr4_1_mask) & ~cr4_0_mask;
++	exec_vmwrite(VMX_GUEST_CR4, temp64);
++	vcpu->arch_vcpu.contexts[vcpu->arch_vcpu.cur_context].cr4 = temp64;
+ 
+-	/* Write updated CR4 (bitwise OR of allowed guest bits and CR4 host
+-	 * value)
+-	 */
+-	vcpu->arch_vcpu.contexts[vcpu->arch_vcpu.cur_context].cr4 |= value;
+-	exec_vmwrite(VMX_GUEST_CR4,
+-		vcpu->arch_vcpu.contexts[vcpu->arch_vcpu.cur_context].cr4);
+-	pr_dbg("VMM: Guest allowed to write 0x%08x to CR4",
+-		  vcpu->arch_vcpu.contexts[vcpu->arch_vcpu.cur_context].cr4);
++	pr_dbg("VMM: Guest allowed to write 0x%08x to CR4", temp64);
+ 
+ 	return 0;
+ }
+diff --git a/arch/x86/vmx.c b/arch/x86/vmx.c
+index 123087f..11b7f84 100644
+--- a/arch/x86/vmx.c
++++ b/arch/x86/vmx.c
+@@ -38,6 +38,8 @@
+ extern struct efi_ctx* efi_ctx;
+ #endif
+ 
++uint64_t cr0_1_mask, cr0_0_mask, cr4_1_mask, cr4_0_mask;
++
+ #define PAT_POWER_ON_VALUE	(PAT_MEM_TYPE_WB + \
+ 				((uint64_t)PAT_MEM_TYPE_WT << 8) + \
+ 				((uint64_t)PAT_MEM_TYPE_WC << 16) + \
+@@ -1029,6 +1031,12 @@ static void init_exec_ctrl(struct vcpu *vcpu)
+ 	/* Read the CR0 fixed0 / fixed1 MSR registers */
+ 	fixed0 = msr_read(MSR_IA32_VMX_CR0_FIXED0);
+ 	fixed1 = msr_read(MSR_IA32_VMX_CR0_FIXED1);
++	cr0_1_mask = fixed0 & fixed1;
++	cr0_0_mask = ~fixed0 & ~fixed1;
++
++	/*enable unrestricted guest */
++	cr0_1_mask &= ~(CR0_PG | CR0_PE);
++	cr0_0_mask |= (CR0_NW | CR0_CD);
+ 
+ 	if (get_vcpu_mode(vcpu) == REAL_MODE) {
+ 		/* Check to see if unrestricted guest support is available */
+@@ -1058,48 +1066,44 @@ static void init_exec_ctrl(struct vcpu *vcpu)
+ 	pr_dbg("Fixed0 CR0 value: 0x%x", fixed0);
+ 	pr_dbg("Fixed1 CR0 value: 0x%x", fixed1);
+ 
+-	/* Determine which bits are "flexible" in CR0 - allowed to be changed
+-	 * as per arch manual in VMX operation.  Any bits that are different
+-	 * between fixed0 and fixed1 are "flexible" and the guest can change.
+-	 */
+-	value32 = fixed0 ^ fixed1;
+-
+-	/* Set the CR0 mask to the inverse of the "flexible" bits */
+-	value32 = ~value32;
+-	exec_vmwrite(VMX_CR0_MASK, value32);
++	/* Set the CR0 mask */
++	exec_vmwrite(VMX_CR0_MASK, cr0_1_mask | cr0_0_mask);
+ 
+ 	/* Output CR0 mask value */
+-	pr_dbg("CR0 mask value: 0x%x", value32);
++	pr_dbg("CR0 mask value: 0x%x", cr0_1_mask | cr0_0_mask);
+ 
+-	/* Calculate the CR0 shadow register value that will be used to enforce
+-	 * the correct values for host owned bits
+-	 */
+-	value32 = (fixed0 | fixed1) & value32;
+-	exec_vmwrite(VMX_CR0_READ_SHADOW, value32);
++	/* Calculate the CR0 shadow register to default value after POST */
++	exec_vmwrite(VMX_CR0_READ_SHADOW, 0x60000010);
+ 
+ 	/* Output CR0 shadow value */
+-	pr_dbg("CR0 shadow value: 0x%x", value32);
++	pr_dbg("CR0 shadow value: 0x%x", 0x60000010);
+ 
+ 	/* Read the CR4 fixed0 / fixed1 MSR registers */
+ 	fixed0 = msr_read(MSR_IA32_VMX_CR4_FIXED0);
+ 	fixed1 = msr_read(MSR_IA32_VMX_CR4_FIXED1);
++	cr4_1_mask = fixed0 & fixed1;
++	cr4_0_mask = ~fixed0 & ~fixed1;
+ 
+ 	/* Output fixed CR0 values */
+ 	pr_dbg("Fixed0 CR4 value: 0x%x", fixed0);
+ 	pr_dbg("Fixed1 CR4 value: 0x%x", fixed1);
+ 
++
++	/* Set the CR4 mask to the inverse of the "flexible" bits */
++	exec_vmwrite(VMX_CR4_MASK, cr4_1_mask | cr4_0_mask);
++
++	/* Output CR4 mask value */
++	pr_dbg("CR4 mask value: 0x%x", cr4_1_mask | cr4_0_mask);
++
++	
+ 	/* Determine which bits are "flexible" in CR4 - allowed to be changed
+ 	 * as per arch manual in VMX operation.  Any bits that are different
+ 	 * between fixed0 and fixed1 are "flexible" and the guest can change.
+ 	 */
+ 	value32 = fixed0 ^ fixed1;
+-
++	
+ 	/* Set the CR4 mask to the inverse of the "flexible" bits */
+ 	value32 = ~value32;
+-	exec_vmwrite(VMX_CR4_MASK, value32);
+-
+-	/* Output CR4 mask value */
+-	pr_dbg("CR4 mask value: 0x%x", value32);
+ 
+ 	/* Calculate the CR4 shadow register value that will be used to enforce
+ 	 * the correct values for host owned bits
+@@ -1210,6 +1214,9 @@ static void override_uefi_vmcs(struct vcpu *vcpu)
+ 		exec_vmwrite(field, cur_context->cr0 & 0xFFFFFFFF);
+ 		pr_dbg("VMX_GUEST_CR0: 0x%016llx ", cur_context->cr0);
+ 
++		field = VMX_CR0_READ_SHADOW;
++		exec_vmwrite(field, cur_context->cr0 & 0xFFFFFFFF);
++
+ 		/* Set up guest CR3 field */
+ 		field = VMX_GUEST_CR3;
+ 		cur_context->cr3 = efi_ctx->cr3;
+@@ -1222,6 +1229,9 @@ static void override_uefi_vmcs(struct vcpu *vcpu)
+ 		exec_vmwrite(field, cur_context->cr4 & 0xFFFFFFFF);
+ 		pr_dbg("VMX_GUEST_CR4: 0x%016llx ", cur_context->cr4);
+ 
++		field = VMX_CR4_READ_SHADOW;
++		exec_vmwrite(field, cur_context->cr4 & 0xFFFFFFFF);
++
+ 		/* Selector */
+ 		field = VMX_GUEST_CS_SEL;
+ 		exec_vmwrite(field, efi_ctx->cs_sel);
+diff --git a/bsp/uefi/efi/boot.c b/bsp/uefi/efi/boot.c
+index af7f82f..d26c8eb 100644
+--- a/bsp/uefi/efi/boot.c
++++ b/bsp/uefi/efi/boot.c
+@@ -199,8 +199,8 @@ again:
+ 	mbi->mi_mmap_length = j*sizeof(struct multiboot_mmap);
+ 
+ 	//mbi->mi_cmdline = (UINTN)"uart=mmio@0x92230000";
+-	//mbi->mi_cmdline = (UINTN)"uart=port@0x3F8";
+-	mbi->mi_cmdline = (UINTN)"uart=disabled";
++	mbi->mi_cmdline = (UINTN)"uart=port@0x3F8";
++	//mbi->mi_cmdline = (UINTN)"uart=disabled";
+ 	mbi->mi_mmap_addr = (UINTN)mmap;
+ 
+ 	mbi->mi_flags |= MULTIBOOT_INFO_HAS_DRIVES;
+diff --git a/bsp/uefi/include/bsp/bsp_cfg.h b/bsp/uefi/include/bsp/bsp_cfg.h
+index 16ec336..53b145c 100644
+--- a/bsp/uefi/include/bsp/bsp_cfg.h
++++ b/bsp/uefi/include/bsp/bsp_cfg.h
+@@ -48,5 +48,5 @@
+ #define	CONFIG_DMAR_PARSE_ENABLED	1
+ #define	CONFIG_GPU_SBDF		0x00000010	/* 0000:00:02.0 */
+ #define CONFIG_EFI_STUB       1
+-#define CONFIG_UEFI_OS_LOADER_NAME  "\\EFI\\org.clearlinux\\bootloaderx64_origin.efi"
++#define CONFIG_UEFI_OS_LOADER_NAME  "\\EFI\\org.clearlinux\\bootloaderx64.efi"
+ #endif /* BSP_CFG_H */
+diff --git a/common/hypercall.c b/common/hypercall.c
+index 4fba746..5cae3c6 100644
+--- a/common/hypercall.c
++++ b/common/hypercall.c
+@@ -679,6 +679,19 @@ int64_t hcall_setup_sbuf(struct vm *vm, uint64_t param)
+ 	return sbuf_share_setup(ssp.pcpu_id, ssp.sbuf_id, hva);
+ }
+ 
++int64_t hcall_print(struct vm *vm, uint64_t param)
++{
++	struct vcpu *vcpu = vm->current_vcpu;
++	uint64_t gpa;
++	uint64_t hpa;
++
++	gpa = gva2gpa(vm,
++	        vcpu->arch_vcpu.contexts[vcpu->arch_vcpu.cur_context].cr3, param);
++	hpa = gpa2hpa(vm, gpa);
++	pr_fatal((char *)hpa);
++	return 0;
++}
++
+ int64_t hcall_get_cpu_pm_state(struct vm *vm, uint64_t cmd, uint64_t param)
+ {
+ 	int target_vm_id;
+diff --git a/include/public/acrn_hv_defs.h b/include/public/acrn_hv_defs.h
+index 168d86b..66d5a36 100644
+--- a/include/public/acrn_hv_defs.h
++++ b/include/public/acrn_hv_defs.h
+@@ -92,6 +92,7 @@
+ /* DEBUG */
+ #define HC_ID_DBG_BASE              0x60UL
+ #define HC_SETUP_SBUF               _HC_ID(HC_ID, HC_ID_DBG_BASE + 0x00)
++#define HC_PRINT                   _HC_ID(HC_ID, HC_ID_DBG_BASE + 0x01)
+ 
+ /* Trusty */
+ #define HC_ID_TRUSTY_BASE           0x70UL
+-- 
+2.14.1
+

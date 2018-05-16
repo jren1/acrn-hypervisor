@@ -1,0 +1,214 @@
+From a44b7a990450cf2050a8a72720cc33179d325b3e Mon Sep 17 00:00:00 2001
+From: Chaohong guo <chaohong.guo@intel.com>
+Date: Thu, 3 May 2018 08:56:06 +0800
+Subject: [PATCH] Build: Save build outputs in differnt directories for
+ debug/release version
+
+The patch tries to create "out" directory in root directory, and save all
+immediate outputs and final binary into that directory.  Also, based on
+platform name, debug or release, version number and rc version, it will
+create different folders.
+
+Signed-off-by: Chaohong Guo <chaohong.guo@intel.com>
+---
+ Makefile              | 21 +++++++++-----
+ bsp/uefi/efi/Makefile | 77 ++++++++++++++++++++++++++++++---------------------
+ 2 files changed, 59 insertions(+), 39 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index c3be780..c5848ea 100644
+--- a/Makefile
++++ b/Makefile
+@@ -9,7 +9,8 @@ RC_VERSION=4
+ API_MAJOR_VERSION=1
+ API_MINOR_VERSION=0
+ 
+-RELEASE ?= 0
++# Default 1 for debug build, 0 for release
++BUILD_DEBUG=1
+ 
+ GCC_MAJOR=$(shell echo __GNUC__ | $(CC) -E -x c - | tail -n 1)
+ GCC_MINOR=$(shell echo __GNUC_MINOR__ | $(CC) -E -x c - | tail -n 1)
+@@ -19,9 +20,15 @@ STACK_PROTECTOR := 1
+ 
+ BASEDIR := $(shell pwd)
+ PLATFORM ?= sbl
+-HV_OBJDIR ?= $(CURDIR)/build
++
+ HV_FILE := acrn
+ 
++ifeq ($(BUILD_DEBUG),1)
++HV_OBJDIR :=out/debug/$(PLATFORM)_d$(MAJOR_VERSION).$(MINOR_VERSION)_rc$(RC_VERSION)
++else
++HV_OBJDIR :=out/release/$(PLATFORM)_r$(MAJOR_VERSION).$(MINOR_VERSION)_rc$(RC_VERSION)
++endif
++
+ CFLAGS += -Wall -W
+ CFLAGS += -ffunction-sections -fdata-sections
+ CFLAGS += -fshort-wchar -ffreestanding
+@@ -166,9 +173,9 @@ endif
+ endif
+ 
+ C_OBJS := $(patsubst %.c,$(HV_OBJDIR)/%.o,$(C_SRCS))
+-ifeq ($(RELEASE),0)
++ifeq ($(DEBUG_BUILD),1)
+ C_OBJS += $(patsubst %.c,$(HV_OBJDIR)/%.o,$(D_SRCS))
+-CFLAGS += -DHV_DEBUG
++CFLAGS += -DHV_DEBUG -g
+ endif
+ S_OBJS := $(patsubst %.S,$(HV_OBJDIR)/%.o,$(S_SRCS))
+ 
+@@ -184,10 +191,10 @@ all: efi
+ .PHONY: efi
+ efi: $(HV_OBJDIR)/$(HV_FILE).bin
+ 	echo "building hypervisor as EFI executable..."
+-	make -C bsp/uefi/efi HV_OBJDIR=$(HV_OBJDIR) RELEASE=$(RELEASE)
++	make -C bsp/uefi/efi HV_OBJDIR=$(HV_OBJDIR)
+ 
+ install: efi
+-	make -C bsp/uefi/efi HV_OBJDIR=$(HV_OBJDIR) RELEASE=$(RELEASE) install
++	make -C bsp/uefi/efi HV_OBJDIR=$(HV_OBJDIR) install
+ endif
+ 
+ $(HV_OBJDIR)/$(HV_FILE).32.out: $(HV_OBJDIR)/$(HV_FILE).out
+@@ -223,7 +230,7 @@ $(VERSION):
+ 	DIRTY=`git diff-index --name-only HEAD`;\
+ 	if [ -n "$$DIRTY" ];then PATCH="$$COMMIT-dirty";else PATCH="$$COMMIT";fi;\
+ 	TIME=`date "+%F %T"`;\
+-	if [ $(RELEASE) = 0 ];then BUILD_TYPE="DBG";else BUILD_TYPE="REL";fi;\
++	if [ $(BUILD_DEBUG) = 0 ];then BUILD_TYPE="DBG";else BUILD_TYPE="REL";fi;\
+ 	cat license_header > $(VERSION);\
+ 	echo "#define HV_MAJOR_VERSION $(MAJOR_VERSION)" >> $(VERSION);\
+ 	echo "#define HV_MINOR_VERSION $(MINOR_VERSION)" >> $(VERSION);\
+diff --git a/bsp/uefi/efi/Makefile b/bsp/uefi/efi/Makefile
+index e65cc89..27cbf45 100644
+--- a/bsp/uefi/efi/Makefile
++++ b/bsp/uefi/efi/Makefile
+@@ -30,16 +30,27 @@
+ # POSSIBILITY OF SUCH DAMAGE.
+ #
+ 
+-RELEASE:=0
+-HV_OBJDIR:=build
+-HV_FILE:=acrn
+-EFI_OBJDIR:=$(HV_OBJDIR)/bsp/uefi/efi
+-C_SRCS = boot.c pe.c malloc.c
+-ACRN_OBJS := $(patsubst %.c,$(EFI_OBJDIR)/%.o,$(C_SRCS))
+-INCLUDE_PATH += ../include/bsp/
++# This Makefile resides in acrn_root/bsp/uefi/efi/
++HV_ROOT_DIR=$(shell pwd)/../../../
++
++# EFI boot stub code dir
++EFI_SRC_DIR=bsp/uefi/efi/
++
++O_DIR:=../../../$(HV_OBJDIR)/$(EFI_SRC_DIR)
++C_DIR:=../../../$(EFI_SRC_DIR)
++
++HV_FILE:=acrn.efi
++BOOT_SO=$(O_DIR)/boot.so
++BOOT_PE=$(O_DIR)/boot.efi
++
++C_SRCS=boot.c pe.c malloc.c
++EFI_OBJS=$(patsubst %.c, $(O_DIR)/%.o, $(C_SRCS))
+ 
+ OBJCOPY=objcopy
+ 
++# The final EFI binary including EFI stub and hypervisor
++EFIBIN=$(HV_ROOT_DIR)/$(HV_OBJDIR)/$(HV_FILE)
++
+ HOST  = $(shell $(CC) -dumpmachine | sed "s/\(-\).*$$//")
+ ARCH := $(shell $(CC) -dumpmachine | sed "s/\(-\).*$$//")
+ 
+@@ -53,8 +64,6 @@ else
+ 	FORMAT=efi-app-ia32
+ endif
+ 
+-INCDIR := /usr/include
+-
+ # gnuefi sometimes installs these under a gnuefi/ directory, and sometimes not
+ ifneq ("$(wildcard $(LIBDIR)/gnuefi/crt0-efi-$(ARCH).o)","")
+ 	CRT0 := $(LIBDIR)/gnuefi/crt0-efi-$(ARCH).o
+@@ -64,11 +73,7 @@ else
+ 	LDSCRIPT := $(LIBDIR)/elf_$(ARCH)_efi.lds
+ endif
+ 
+-
+-
+-CFLAGS=-I. -I.. -I$(INCDIR)/efi -I$(INCDIR)/efi/$(ARCH) \
+-		-DEFI_FUNCTION_WRAPPER -fPIC -fshort-wchar -ffreestanding \
+-		-Wall -I../fs/ -D$(ARCH)
++CFLAGS=-DEFI_FUNCTION_WRAPPER -fPIC -fshort-wchar -ffreestanding -Wall -D$(ARCH)
+ 
+ ifeq ($(ARCH),ia32)
+ 	ifeq ($(HOST),x86_64)
+@@ -79,41 +84,49 @@ ifeq ($(ARCH),x86_64)
+ 	CFLAGS += -mno-red-zone
+ endif
+ 
++I_PATH=-I../include/bsp/ -I. -I.. -I../fs/ -I/usr/include/efi \
++       -I/usr/include/efi/$(ARCH)
++
+ LDFLAGS=-T $(LDSCRIPT) -Bsymbolic -shared -nostdlib -znocombreloc \
+ 		-L$(LIBDIR) $(CRT0)
+-EFIBIN=$(HV_OBJDIR)/$(HV_FILE).efi
+-BOOT=$(EFI_OBJDIR)/boot.efi
++
+ 
+ CONF_FILE=$(CURDIR)/../clearlinux/acrn.conf
+ 
+-all: $(EFIBIN)
+-	$(OBJCOPY)  --add-section .hv="$(HV_OBJDIR)/$(HV_FILE).bin"  --change-section-vma .hv=0x6e000 --set-section-flags .hv=alloc,data,contents,load  --section-alignment 0x1000 $(EFI_OBJDIR)/boot.efi  $(EFIBIN)
+ 
+-install: $(EFIBIN) install-conf
+-	install -D $(EFIBIN) $(DESTDIR)/usr/share/acrn/$(HV_FILE).efi
+ 
+-$(EFIBIN): $(BOOT)
++all: env $(BOOT_PE)
++	$(OBJCOPY)  --add-section .hv="$(patsubst %.efi,%.out,$(EFIBIN))" \
++	--change-section-vma .hv=0x6e000 --set-section-flags \
++	.hv=alloc,data,contents,load  --section-alignment 0x1000 \
++	$(BOOT_PE)  $(EFIBIN)
++
++env:
++	mkdir -p $(O_DIR);
++
++$(O_DIR)/%.o: $(C_DIR)/%.c
++	$(CC) -c $(CFLAGS) $(ARCH_CFLAGS) $(I_PATH) $< -o $@
++
++$(BOOT_SO): $(EFI_OBJS)
++	$(LD) $(LDFLAGS) -o $@ $^  -lgnuefi -lefi $(shell $(CC) $(CFLAGS) \
++		-print-libgcc-file-name);
++
++$(BOOT_PE): $(BOOT_SO)
++	$(OBJCOPY) -j .text -j .sdata -j .data -j .dynamic -j .dynsym -j .rel \
++	-j .rela -j .reloc --target=$(FORMAT) $^ $@
+ 
+-$(EFI_OBJDIR)/boot.efi: $(EFI_OBJDIR)/boot.so
++install: $(EFIBIN) install-conf
++	install -D $(EFIBIN) $(DESTDIR)/usr/share/acrn/$(HV_FILE)
+ 
+-$(EFI_OBJDIR)/boot.so: $(ACRN_OBJS) $(FS)
+-	$(LD) $(LDFLAGS) -o $@ $^  -lgnuefi -lefi $(shell $(CC) $(CFLAGS) -print-libgcc-file-name)
+ 
+ install-conf: $(CONF_FILE)
+ 	install -d $(DESTDIR)/usr/share/acrn/demo
+ 	install -t $(DESTDIR)/usr/share/acrn/demo -m 644 $^
+ 
+ clean:
+-	rm -f $(BOOT) $(HV_OBJDIR)/$(HV_FILE).efi $(EFI_OBJDIR)/boot.so $(ACRN_OBJS) $(FS)
++	rm -f $(BOOT) $(HV_OBJDIR)/$(HV_FILE) $(EFI_OBJDIR)/boot.so $(ACRN_OBJS) $(FS)
+ 
+ $(EFI_OBJDIR)/%.o:%.S
+ 	[ ! -e $@ ] && mkdir -p $(dir $@); \
+ 	$(CC) $(CFLAGS)   -c -o $@ $<
+ 
+-$(EFI_OBJDIR)/%.o: %.c
+-	[ ! -e $@ ] && mkdir -p $(dir $@); \
+-	$(CC) $(patsubst %, -I%, $(INCLUDE_PATH)) -I. -c $(CFLAGS) $(ARCH_CFLAGS) $< -o $@
+-
+-%.efi: %.so
+-	$(OBJCOPY) -j .text -j .sdata -j .data -j .dynamic -j .dynsym -j .rel \
+-		-j .rela -j .reloc --target=$(FORMAT) $*.so $@
+-- 
+2.14.1
+

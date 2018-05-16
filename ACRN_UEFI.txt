@@ -1,0 +1,365 @@
+/*
+ * Copyright (C) 2018 Intel Corporation. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ *   * Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in
+ *     the documentation and/or other materials provided with the
+ *     distribution.
+ *   * Neither the name of Intel Corporation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+==================================
+ACRN Hypervisor on UEFI Platform
+==================================
+
+The document provides an overview about how to build/debug ACRN hyperivsor and
+service operating system(SOS, Domain0 in Xen's words) on UEFI/BIOS platform.
+At present, the git tree includes the source code of hypervisor, but doesn't
+include SOS source code, which can be downloaded from Intel public ClearLinux
+git repository. The doc is to give a quick start to developers, If you don't
+want to build it from source code by yourself, and just like to run the binary
+please go to: https://projectacrn.github.io/getting_started/index.html
+
+
+
+============= Table of Contents =================
+1. How to Build ACRN Hypervisor
+
+2. How to Build Service OS
+    2.1  How to get ACRN SOS patches
+    2.2  How to get kernel base
+    2.3  Apply Patches to Stable Kernel
+
+3. How to Run ACRN
+    3.1 Run ACRN in ClearLinux
+    3.2 Set Boot Order
+
+4. Launching User OS
+
+5. Basic debug
+
+   Reference
+==================================================
+
+
+
+1. How to Build ACRN Hypervisor
+===============================
+There is a Makefile file in the top directory of ACRN hypervisor source tree.
+To make a binary for UEFI platform. just do:
+
+                make PLATFORM=uefi
+
+By default, it will produce the binary of debug version in ./build directory.
+To build a release version, run the command:
+
+                make PLATFORM=uefi RELEASE=1  # 1 or any non-zero number
+
+        then, we get:
+
+        test@/work/gitHub/hypervisor$ ls -l build
+        total 2196
+        -rwxr-xr-x 1 minskey minskey  292180 Apr   4 22:29 acrn.32.out
+        -rwxr-xr-x 1 minskey minskey  283328 Apr   4 22:29 acrn.bin
+        -rwxr-xr-x 1 minskey minskey  342004 Apr   4 22:29 acrn.efi
+        -rw-r--r-- 1 minskey minskey  253579 Apr   4 22:29 acrn.map
+        -rwxr-xr-x 1 minskey minskey 1042416 Apr   4 22:29 acrn.out
+        drwxr-xr-x 3 minskey minskey    4096 Apr   4 22:29 arch
+        drwxr-xr-x 2 minskey minskey    4096 Apr   4 22:29 boot
+        drwxr-xr-x 3 minskey minskey    4096 Apr   4 22:29 bsp
+        drwxr-xr-x 2 minskey minskey    4096 Apr   4 22:29 common
+        drwxr-xr-x 3 minskey minskey    4096 Apr   4 22:29 lib
+        -rw-r--r-- 1 minskey minskey    1616 Apr   4 22:29 link_ram.ld
+
+     The "acrn.efi" is the hyperivosr embedded into EFI app(stub), which
+     can be loaded by UEFI BIOS; The "acrn.out" is 64 bit hypervisor,
+     which needs a UEFI bootloader(Like GRUB) to load; The "acrn.32.out"
+     is a variant of acrn.out -- 32 bit EFL header in case that booloader
+     supports 32 bit only. Just choose one of them to use as hyperviosr.
+
+
+2. How to Build Service OS
+===========================
+Currently ACRN just supports Linux as Service Operating System (SOS). All
+patches are released agaist Linux v4.14.x stable kernel. Both the kernel
+source and the patches are needed to build an ACRN SOS. After downloading
+code/patches, apply ACRN SOS patches to Linux stable kernel, say v4.14.23,
+Then, following general Linux kernel build steps to get a Linux kernel image,
+say bzImage.
+
+
+2.1   How to get ACRN SOS patches
+-----------------------------------
+The ACRN service OS patches can be downloaded by,
+    git clone  https://github.com/clearlinux-pkgs/linux-pk414.git
+
+In the root directory of pk414 kernel, there is a file named "upstream", read
+it to get the Linux kernel version on which those patches will be applied. At
+the time of doc written, the kernel is linux v4.14.23 stable kernel.
+
+
+2.2   How to get kernel base
+--------------------------------
+The patches from ClearLinux git (refer to 2.1), are based on the source code of
+Linux stable kernel.  We can use choose one of the following two ways to fetch
+the kernel source code.
+
+  (Please use the verion number in the "upstream" file to replace "4.14.23"
+   when running the following command)
+
+  a. Get the tarball from www.kernel.org,
+     $ wget -c https://www.kernel.org/pub/linux/kernel/v4.x/linux-4.14.23.tar.xz
+     $ tar xJf linux-4.14.23.tar.xz
+
+      Or,
+
+  b. Get the source code from linux stable tree,
+      $ git clone https://git.kernel.org/pub/scm/linux/kernel/git/stable/ \
+                             linux-stable.git linux-4.14.y
+      $ git checkout -b linux-4.14.23 v4.14.23
+
+
+
+2.3 Apply Patches to Stable Kernel
+-----------------------------------
+We recommend to build the code (including Hypervisor, SOS) on ClearLinux. But
+Other Linux OS distributions are supported as well. The following build steps
+assume that you have Linux kernel in the diretory "~/linux-4.14.23" and ACRN
+SOS patches in "~/linux-pk414"
+
+      a. In ~/linux-4.14.23, run:
+             #  for i in `ls ~/linux-pk414/*.patch`; do patch -p1 <$i; done;
+
+         Or use git if ~/linux-4.14.23 is a git repository:
+             # git am ~/linux-pk414/*.patch 
+
+      b. # cp ~/linux-pk414/config-pk414-sos  ~/linux-4.14.23/.config
+
+      c. # cp -a /usr/lib/firmware/i915   ~/linux-4.14.23/firmware
+         # cp -a /usr/lib/firmware/intel-ucode  ~/linux-4.14.23/firmware
+
+   Notes for step c
+         c.1) "grep CONFIG_EXTRA_FIRMWARE .config"  to find the directory, which
+             is now "firmware". So, in above step c, we create the "firmware" dir
+             in top directory of kernel source, and copy i915 and CPU ucode there.
+             The name of dir may be changed in the future.
+
+         c.2) " grep CONFIG_EXTRA_FIRMWARE_DIR .config" to find required firmware.
+             If any firmware is missed in host system, download it from clearlinux
+             or linuxfirm:
+
+             - From ClearLinux
+               wget -c https://download.clearlinux.org/releases/current/clear/ \
+                        x86_64/os/Packages/linux-firmware-XXX.x86_64.rpm
+
+               rpm2cpio linux-firmware-XXX.x86_64.rpm | cpio -idmv
+
+               Curretnly, the name of firmare package is : 
+                            linux-firmware-20180000-51.x86_64.rpm
+
+             - From linux firmware git:
+                  https://git.kernel.org/pub/scm/linux/kernel/git/firmware/ \
+                                  linux-firmware.git
+ 
+         c.4) Alternatively, you can remove that two config options from the .config
+              file in case that you don't want to build the firmwara.
+ 
+      d. Apply the patch to Makefile in topdir of kernel tree:
+
+        diff --git a/Makefile b/Makefile
+	index 248b9928..7e86de02 100644
+	--- a/Makefile
+	+++ b/Makefile
+	@@ -2,8 +2,12 @@
+	 VERSION = 4
+	 PATCHLEVEL = 14
+	 SUBLEVEL = 23
+	-EXTRAVERSION =
+	+EXTRAVERSION = -acrn
+	 NAME = Petit Gorille
+
+	+PWD=$(shell pwd)
+	+export INSTALL_PATH=$(PWD)/out
+	+export INSTALL_MOD_PATH=$(PWD)/out
+
+      e. # make bzImage;
+         # make modules; 
+         # make modules_install; 
+
+    Now, the Linux kernel modules are in ~/linux-4.14.23/out, and kernel
+    image is ~/linux-4.14.23/arch/x86/boot/bzImage
+    
+
+3.  How to Run ACRN
+===================
+To run ACRN hypervisor, a root file system (rootfs) is needed, which will be
+mounted as SOS's rootfs. You can install a Linux distribution and use the root
+of the installation as rootfs for SOS, or use other ways to create a rootfs.
+
+We assume that you have the folloinwg paritions or create it as follows:
+
+                Partition 	Size 	Type
+                /dev/sda1 	511M 	EFI System
+                /dev/sda2 	1G 	Linux swap   (or non)
+                /dev/sda3 	111.3G 	Linux root (x86-64)
+
+3.1 Run ACRN in ClearLinux
+--------------------------
+Follow the following link to install ClearLinux,
+     https://projectacrn.github.io/getting_started/index.html
+
+After instatllation completed, do:
+   Step 1. # mount /dev/sda1 /boot
+   Step 2. # cp ~/hypervisor/build/acrn.efi  /boot/EFI/org.clearlinux/
+   Step 3. # cp ~/acrn-sos/vmlinuz-4.14.23-xxx /boot/EFI/org.clearlinux/
+   Step 4. # cp -R ~/acrn-sos/lib/modules/4.14.23-xxxx /lib/modules/
+   Step 6. # cp ~/hypervisor/bsp/uefi/clearlinux/acrn.conf /boot/loader/entries/
+   Step 7. In /boot/loader/entries/acrn.conf, change the line:
+            linux /EFI/org.clearlinux/kernel-org.clearlinux.pk414-sos.4.14.23-19
+           to,
+            linux  /EFI/org.clearlinux/your_linux_bzImage
+   Step 8. # echo "timeout 10" >> /mnt/loader/loader.conf
+   Step 9. # cd; umount /boot
+   Step a. Refer to *3.2* "Set Right Boot Order"
+
+   Note:  please check the boot order, if the system boots from other boot
+          loaders instead of "acrn.efi", the hypervisor will fail. 
+
+
+3.2 Set Boot Order
+-------------------
+The boot order can be configured in UEFI/BIOS GUI, UEFI Shell or Linux OS. It's
+up to you. For GUI, figure it out in the "Boot Order" or "Boot Sequence" options.
+And for the other two, read the following: 
+
+    *** Set Boot Order in UEFI Shell
+
+        Shell> bcfg boot add 0 fs0:\EFI\org.clearlinux\acrn.efi "ACRN Hypervisor"
+
+     Check if "ACRN Hypervisor" is the first one to boot
+
+             Shell> bcfg boot dump
+
+       Option: 00. Variable: Boot0000 
+         Desc    - ACRN Hypervisor
+         DevPath - PciRoot(0x0)/Pci(0x12,0x0)/Sata(0x0,0xFFFF,0x0)/HD(1,GPT, \
+                     2697C257-CA3C-428D-916C-D67104A43C45,0x800,0x12A0000)/ \
+                     \EFI\org.clearlinux\acrn.efi
+         Optional- N
+       Option: 01. Variable: Boot0002
+         Desc    - UEFI : Built-in EFI Shell
+         DevPath - VenMedia(5023B95C-DB26-429B-A648-BD47664C8012)
+         Optional- Y
+       Option: 02. Variable: Boot0001
+         Desc    - Clear Linux Native Boot
+         DevPath - PciRoot(0x0)/Pci(0x12,0x0)/Sata(0x0,0xFFFF,0x0)/HD(1,GPT, \
+                    2697C257-CA3C-428D-916C-D67104A43C45,0x800,0x12A0000)/ \
+                    EFI\org.clearlinux\bootloaderx64.efi
+         Optional- N
+
+  Note: 
+        If system doesn't have "bcfg" command, download one from github:
+        https://github.com/tianocore/edk2/raw/master/ShellBinPkg/uefiShell \
+                 /X64/Shell.efi
+
+        and copy "Shell.efi" to "/boot/EFI/BOOT/".  In BIOS, set UEFI shell as
+        the first one to boot, after boot into UEFI shell, do: 
+
+             Shell> fs0:
+             Shell> cd EFI
+             Shell> cd BOOT
+             Shell> Shell.efi
+
+        Wait for the new Shell.efi to start up, use UEFI "bcfg" command.
+
+   *** Set Boot Order in Clearlinux (Linux OS) by boot
+
+
+        # efibootmgr -c -d /dev/sda -p 1 -l "EFI\org.clearlinux\acrn.efi" -L "ACRN Hypervisor"
+        # efibootmgr -v                // check boot order
+        # efibootmgr -o xxxx           // make sure acrn.efi first boot
+
+
+
+4. Launching User OS
+====================
+ACRN uses hybird devcice emulation, that's why we need Service OS. The SOS is
+responsbile to allocate memroy, (virtual and physical) devices, and handle I/O
+for User OS by cooperating with Hypervisor.
+
+The "acrn-dm" command/daemon is used to lauch UOS. Download device model from
+the following link, and enter into root direcotry, just "make" to get it.
+
+        https://github.com/projectacrn/acrn-devicemodel
+
+Then, 
+       copy the build/acrn-dm to /usr/bin/ of SOS's rootfs, which you prepared
+       in Chapter 3.  For how to use the command line to lauch UOS, please take
+       a look at the script,
+
+               acrn-devicemodel/samples/launch_uos.sh. 
+
+       and refer to reference 1 at the end of this document.
+
+
+5. Basic debug
+==============
+For debugging goal, ACRN provides serial port console & shell support in both
+hypervisor and guest OS (via virtual UART). To enable it, you need to know a
+little bit about your UART hardware.
+
+For the time being, please search "uart" in the file,
+
+   acrn-hypervisor/bsp/uefi/efi/boot.c
+ 
+Comment this line,
+        mbi->mi_cmdline = (UINTN)"uart=disabled";
+
+And if you have an I/O port UART at 0x3F8,  comment out the following line,
+    //mbi->mi_cmdline = (UINTN)"uart=port@0x3F8";
+
+Or if you have a memory-mapped UART, comment out the following line and change
+the mmio address to yours
+    //mbi->mi_cmdline = (UINTN)"uart=mmio@0x92230000";
+
+Then, re-build acrn.efi.  For more debugging skills, please go to the ACRN
+document web site.
+
+
+
+
+
+
+====================================================================================
+Reference:
+  1. ACRN Start: https://projectacrn.github.io/getting_started/index.html
+  2. ACRN document:  https://projectacrn.github.io/introduction/index.html
+  3. Intel ClearLinux:
+      https://clearlinux.org/documentation/clear-linux/get-started/bare-metal-install
+  4. ACRN Service OS code:  https://github.com/clearlinux-pkgs/linux-pk414.git.
+  5. ACRN Hypervisor & device model code:  https://github.com/projectacrn
+
+
+
+====================================================================================
+Join us at:   acrn-dev@lists.projectacrn.org

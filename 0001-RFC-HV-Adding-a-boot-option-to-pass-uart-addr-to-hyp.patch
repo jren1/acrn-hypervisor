@@ -1,0 +1,154 @@
+From 8b5ef105c78a900a776217a06ad4a72a1e3e2bcb Mon Sep 17 00:00:00 2001
+From: Chaohong guo <chaohong.guo@intel.com>
+Date: Mon, 2 Apr 2018 22:26:31 +0800
+Subject: [PATCH] [RFC] HV: Adding a boot option to pass uart addr to
+ hypervisor
+
+Adding a boot option to pass the address of serial port to hypervisor.
+Currently, we have to recompile source code if we change the uart addr.
+Pass uart=mmio@0x92230000, or uart=port@0x3F8 before sos= in acrn.conf
+file to get it work.
+---
+ bsp/uefi/efi/boot.c | 58 +++++++++++++++++++++++++++++++++++++++++++----------
+ bsp/uefi/efi/boot.h |  2 +-
+ 2 files changed, 48 insertions(+), 12 deletions(-)
+
+diff --git a/bsp/uefi/efi/boot.c b/bsp/uefi/efi/boot.c
+index bf2c22e..6e4e9c3 100644
+--- a/bsp/uefi/efi/boot.c
++++ b/bsp/uefi/efi/boot.c
+@@ -232,7 +232,7 @@ out:
+  * load_kernel - Load a kernel image into memory from the boot device
+  */
+ EFI_STATUS
+-load_sos_image(EFI_HANDLE image, CHAR16 *name, CHAR16 *cmdline)
++load_sos_image(EFI_HANDLE image, CHAR16 *name, CHAR16 *cmdline, char *hcmdline)
+ {
+ 	UINTN map_size, _map_size, map_key;
+ 	UINT32 desc_version;
+@@ -442,18 +442,28 @@ again:
+ 
+ 	mbi->mi_flags |= MULTIBOOT_INFO_HAS_MMAP | MULTIBOOT_INFO_HAS_CMDLINE;
+ 	mbi->mi_mmap_length = j*sizeof(struct multiboot_mmap);
+-
+-	//mbi->mi_cmdline = (UINTN)"uart=mmio@0x92230000";
+-	//mbi->mi_cmdline = (UINTN)"uart=port@0x3F8";
+-	mbi->mi_cmdline = (UINTN)"uart=disabled";
+ 	mbi->mi_mmap_addr = (UINTN)mmap;
+ 
++	if (hcmdline) {
++		/* mbi->mi_cmdline = (UINTN)"uart=mmio@0x92230000";
++		 * mbi->mi_cmdline = (UINTN)"uart=port@0x3F8";
++		 *
++		 * Pass the boot option "uart=mmio@xxxxx" or "uart=port@0x3F8"
++		 * to hypervisor before "sos=bzImage" to enable hyervisor to
++		 * use the serial port to show a debug shell
++		 */
++		mbi->mi_cmdline = (UINTN)hcmdline;
++	} else {
++		/* Disable it in case polling for-ever */
++	       mbi->mi_cmdline = (UINTN)"uart=disabled";
++	}
++
+ #ifdef LEAGCY_BIOS
+ 	/* copy rsdt in low memory space(0~0x1000) for hypervisor parsing */
+ 	memcpy((void *)0x500, (void*)rsdp, sizeof(struct acpi_table_rsdp));
+ 	*(UINT16*)(0x40E) = 0x50;
+ #endif
+-	//Print(L"start 9!\n");
++	Print(L"Ready to load service OS...\n");
+ 
+ 	asm volatile ("mov %%cr0, %0":"=r"(pe->cr0));
+ 	asm volatile ("mov %%cr3, %0":"=r"(pe->cr3));
+@@ -496,7 +506,7 @@ out:
+ 
+ static EFI_STATUS
+ parse_args(CHAR16 *options, UINT32 size, CHAR16 **name,
+-		CHAR16 **hcmdline, CHAR16 **scmdline)
++		char **hcmdline, CHAR16 **scmdline)
+ {
+ 	CHAR16 *n, *p, *cmdline, *search;
+ 	UINTN i = 0;
+@@ -510,12 +520,38 @@ parse_args(CHAR16 *options, UINT32 size, CHAR16 **name,
+ 	search = PoolPrint(L"sos=");
+ 	n = strstr_16(cmdline, search);
+ 	if (!n) {
+-		Print(L"Failed to get sos\n");
++		Print(L"Failed to get \"sos=xxx\" from boot/config option !\n");
+ 		return EFI_OUT_OF_RESOURCES;
+ 	}
+ 	FreePool(search);
+ 
+ 
++	p = cmdline;
++	while ((p != n) && isspace((CHAR8)*p)) {
++		p++;
++	}
++
++	if ((p != n) && isspace((CHAR8)*(n-1))){
++
++		int len, k;
++		EFI_STATUS err;
++		EFI_PHYSICAL_ADDRESS addr;
++
++		*(n-1) = '\0';
++		len = n - p + 1;
++		err = emalloc(len, 1, &addr);
++		if (err) {
++			Print(L"Failed to get memory for hyperivor cmdline\n");
++			return EFI_OUT_OF_RESOURCES;
++		}
++
++		*hcmdline = (char *)addr;
++		(*hcmdline)[len -1] = 0;
++		for (k = 0; k < len; k++) {
++			(*hcmdline)[k] = p[k];
++		}
++	}
++
+ 	n += 4;
+ 	p = n;
+ 	i = 0;
+@@ -524,7 +560,6 @@ parse_args(CHAR16 *options, UINT32 size, CHAR16 **name,
+ 	}
+ 	*n++ = '\0';
+ 	*name = p;
+-
+ 	*scmdline = n;
+ 
+ 	return EFI_SUCCESS;
+@@ -545,7 +580,8 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *_table)
+ 	EFI_PHYSICAL_ADDRESS addr;
+ 	CHAR16 *options = NULL, *name;
+ 	UINT32 options_size = 0;
+-	CHAR16 *hcmdline, *scmdline;
++	char *hcmdline;
++	CHAR16 *scmdline;
+ 	UINTN sec_addr;
+ 	UINTN sec_size;
+ 	char *section;
+@@ -587,7 +623,7 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *_table)
+ 	memcpy((char*)addr, info->ImageBase + sec_addr, sec_size);
+ 
+ 	/* load sos and run hypervisor */
+-	err = load_sos_image(image, name, scmdline);
++	err = load_sos_image(image, name, scmdline, hcmdline);
+ 
+ 	if (err != EFI_SUCCESS)
+ 		goto free_args;
+diff --git a/bsp/uefi/efi/boot.h b/bsp/uefi/efi/boot.h
+index 21cb875..0c26aaa 100644
+--- a/bsp/uefi/efi/boot.h
++++ b/bsp/uefi/efi/boot.h
+@@ -48,7 +48,7 @@
+ 
+ 
+ EFI_STATUS get_pe_section(CHAR8 *base, char *section, UINTN *vaddr, UINTN *size);
+-EFI_STATUS load_sos_image(EFI_HANDLE image, CHAR16 *name, CHAR16 *cmdline);
++EFI_STATUS load_sos_image(EFI_HANDLE image, CHAR16 *name, CHAR16 *cmdline, char *hcmdline);
+ 
+ struct efi_info {
+ 	UINT32 efi_loader_signature;
+-- 
+2.14.1
+
