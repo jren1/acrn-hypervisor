@@ -26,7 +26,7 @@ tools:
 	make -C $(T)/tools/acrnlog OUT_DIR=$(TOOLS_OUT)
 	make -C $(T)/tools/acrn-manager OUT_DIR=$(TOOLS_OUT)
 	make -C $(T)/tools/acrntrace OUT_DIR=$(TOOLS_OUT)
-	make -C $(T)/tools/acrn-crashlog OUT_DIR=$(TOOLS_OUT) RELEASE=$(RELEASE)
+	#make -C $(T)/tools/acrn-crashlog OUT_DIR=$(TOOLS_OUT) RELEASE=$(RELEASE)
 
 .PHONY: clean
 clean:
