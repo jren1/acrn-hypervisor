@@ -26,13 +26,9 @@ services:
 
 before_install:
    - docker build -t ${OS_TESTED_CL} -f .travis-dockerfiles/Dockerfile.${OS_TESTED_CL} .
-   - docker build -t ${OS_TESTED_UBUNTU} -f .travis-dockerfiles/Dockerfile.${OS_TESTED_UBUNTU} .
-   - docker build -t ${OS_TESTED_FEDORA} -f .travis-dockerfiles/Dockerfile.${OS_TESTED_FEDORA} .
    - docker images
 
 install: true
 
 script:
    - docker run -v $PWD:/root/acrn ${OS_TESTED_CL} /bin/bash -c "make clean && make PLATFORM=$PLATFORM RELEASE=$RELEASE"
-   - docker run -v $PWD:/root/acrn ${OS_TESTED_UBUNTU} /bin/bash -c "make clean && make PLATFORM=$PLATFORM RELEASE=$RELEASE"
-   - docker run -v $PWD:/root/acrn ${OS_TESTED_FEDORA} /bin/bash -c "make clean && make PLATFORM=$PLATFORM RELEASE=$RELEASE"
