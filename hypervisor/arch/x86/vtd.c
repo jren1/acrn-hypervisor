@@ -281,8 +281,10 @@ static inline void dmar_wait_completion(const struct dmar_drhd_rt *dmar_unit, ui
 		if (condition) {
 			break;
 		}
+#if 0
 		ASSERT(((rdtsc() - start) < CYCLES_PER_MS),
 			"DMAR OP Timeout!");
+#endif
 		asm_pause();
 	}
 }
@@ -607,7 +609,7 @@ static void dmar_issue_qi_request(struct dmar_drhd_rt *dmar_unit, struct dmar_en
 			break;
 		}
 		if ((rdtsc() - start) > CYCLES_PER_MS) {
-			pr_err("DMAR OP Timeout! @ %s", __func__);
+			;//pr_err("DMAR OP Timeout! @ %s", __func__);
 		}
 		asm_pause();
 	}
