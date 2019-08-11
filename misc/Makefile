@@ -4,7 +4,7 @@ RELEASE ?= 0
 
 .PHONY: all acrn-crashlog acrnlog acrn-manager acrntrace acrnbridge
 ifeq ($(RELEASE),0)
-all: acrn-crashlog acrnlog acrn-manager acrntrace acrnbridge
+all: acrnlog acrn-manager acrntrace acrnbridge
 else
 all: acrn-manager acrnbridge
 endif
