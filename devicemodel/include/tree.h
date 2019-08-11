@@ -30,7 +30,6 @@
 #ifndef	_TREE_H_
 #define	_TREE_H_
 
-#include <sys/cdefs.h>
 
 /*
  * This file defines data structures for different types of trees:

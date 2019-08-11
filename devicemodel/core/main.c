@@ -37,6 +37,7 @@
 #include <sysexits.h>
 #include <stdbool.h>
 #include <getopt.h>
+#include <signal.h>
 
 #include "vmmapi.h"
 #include "sw_load.h"

@@ -32,6 +32,7 @@
 #define	IODEV_PIO_READ		0
 #define	IODEV_PIO_WRITE		1
 
+typedef unsigned int u_int;
 struct iodev_pio_req {
 	u_int access;
 	u_int port;

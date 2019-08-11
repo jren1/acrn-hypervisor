@@ -31,7 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <sys/errno.h>
+#include <errno.h>
 
 #include "dm.h"
 #include "vmmapi.h"

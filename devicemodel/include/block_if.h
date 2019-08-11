@@ -37,7 +37,7 @@
 #define _BLOCK_IF_H_
 
 #include <sys/uio.h>
-#include <sys/unistd.h>
+#include <unistd.h>
 
 #define BLOCKIF_IOV_MAX		256	/* not practical to be IOV_MAX */
 

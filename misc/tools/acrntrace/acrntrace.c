@@ -286,7 +286,7 @@ static void destory_reader(reader_struct * reader)
 	if (reader->thrd) {
 		pthread_cancel(reader->thrd);
 		if (pthread_join(reader->thrd, NULL) != 0)
-			pr_err("failed to cancel thread[%lu]\n", reader->thrd);
+			pr_err("failed to cancel thread[%lu]\n", (unsigned long)reader->thrd);
 		else
 			reader->thrd = 0;
 	}

@@ -40,6 +40,8 @@
 #include "inout.h"
 #include "pit.h"
 
+#include <signal.h>
+
 #define	TMR2_OUT_STS		0x20
 
 #define	PIT_8254_FREQ		(1193182)

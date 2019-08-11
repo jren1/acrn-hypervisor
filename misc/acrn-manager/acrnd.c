@@ -238,12 +238,21 @@ static void acrnd_run_vm(char *name)
 	/*If do not use logfile, then output to stdout,
 	 so that it can be redirected to journal by systemd */
 	if (logfile) {
-		stdin = freopen("/dev/null", "r+", stdin);
-		stdout = freopen("/dev/null", "r+", stdout);
-		stderr = freopen("/dev/null", "r+", stderr);
-		fflush(stdin);
-		fflush(stdout);
-		fflush(stderr);
+#if 1
+		FILE *fp;
+		fp = fopen("/dev/null", "r+");
+		dup2(fileno(fp), STDIN_FILENO);
+		dup2(fileno(fp), STDOUT_FILENO);
+		dup2(fileno(fp), STDERR_FILENO);
+		fclose(fp);
+#else
+		int fd;
+		fd = open("/dev/null", O_WRONLY | O_APPEND);
+		dup2(fd, STDIN_FILENO);
+		dup2(fd, STDOUT_FILENO);
+		dup2(fd, STDERR_FILENO);
+		close(fd);
+#endif
 	}
 
 	start_vm(name);

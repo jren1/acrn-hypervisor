@@ -27,7 +27,7 @@
  */
 
 #include <stdio.h>
-#include <sys/errno.h>
+#include <errno.h>
 
 #include "pci_core.h"
 #include "uart_core.h"

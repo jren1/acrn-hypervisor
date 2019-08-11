@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <sys/queue.h>
 #include <sys/un.h>
+#include <string.h>
 #include <pthread.h>
 #include <errno.h>
 #include <sys/un.h>

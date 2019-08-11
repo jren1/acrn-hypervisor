@@ -36,7 +36,7 @@
 #include <openssl/md5.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <net/if.h>
 #include <linux/if_tun.h>
 

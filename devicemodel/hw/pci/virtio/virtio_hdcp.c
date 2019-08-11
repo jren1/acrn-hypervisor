@@ -45,7 +45,6 @@
  *
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/uio.h>
 #include <err.h>
@@ -363,7 +362,7 @@ connect_hdcp_daemon()
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, HDCP_SDK_SOCKET_PATH, sizeof(addr.sun_path));
 
-	ret = connect(fd, &addr, sizeof(struct sockaddr_un));
+	ret = connect(fd, (const struct sockaddr *)&addr, sizeof(struct sockaddr_un));
 	if (ret < 0) {
 		WPRINTF(("connect error %d\n", errno));
 		close(fd);
